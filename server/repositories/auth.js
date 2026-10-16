@@ -1,45 +1,22 @@
-const ACCOUNT_COLUMNS = 'id, username, password_salt, password_hash, created_at';
-
 export function createAuthRepository(db) {
   return {
-    async getLocalAccount() {
-      const result = await db.query(`SELECT ${ACCOUNT_COLUMNS} FROM local_account WHERE id = 1`);
-      const row = result.rows[0];
-      if (!row) return null;
-      return {
-        id: Number(row.id),
-        username: row.username,
-        password_salt: row.password_salt,
-        password_hash: row.password_hash,
-        created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
-      };
-    },
-
-    async saveLocalAccount(account) {
-      await db.query(
-        `INSERT INTO local_account (id, username, password_salt, password_hash, created_at)
-         VALUES (1, $1, $2, $3, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           username = EXCLUDED.username,
-           password_salt = EXCLUDED.password_salt,
-           password_hash = EXCLUDED.password_hash`,
-        [account.username, account.passwordSalt, account.passwordHash],
-      );
-      return this.getLocalAccount();
-    },
-
-    async createSession(tokenHash, expiresAt) {
-      const expiry = expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    async createSession({ tokenHash, userId, expiresAt }) {
       await this.deleteExpiredSessions();
       await db.query(
-        'INSERT INTO auth_sessions (token_hash, expires_at, created_at) VALUES ($1, $2, NOW())',
-        [tokenHash, expiry],
+        `INSERT INTO auth_sessions (token_hash, user_id, expires_at, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [tokenHash, userId, expiresAt],
       );
     },
 
     async getSessionByTokenHash(tokenHash) {
       const result = await db.query(
-        'SELECT token_hash, expires_at FROM auth_sessions WHERE token_hash = $1',
+        `SELECT s.token_hash, s.user_id, s.expires_at,
+                u.id AS uid, u.name, u.email, u.created_at AS user_created_at,
+                u.updated_at AS user_updated_at
+           FROM auth_sessions s
+           JOIN users u ON u.id = s.user_id
+          WHERE s.token_hash = $1`,
         [tokenHash],
       );
       const row = result.rows[0];
@@ -49,7 +26,24 @@ export function createAuthRepository(db) {
         await this.deleteSession(tokenHash);
         return null;
       }
-      return { token_hash: row.token_hash, expires_at: expiresAt.toISOString() };
+      return {
+        token_hash: row.token_hash,
+        user_id: Number(row.user_id),
+        expires_at: expiresAt.toISOString(),
+        user: {
+          id: Number(row.uid),
+          name: row.name,
+          email: row.email,
+          created_at:
+            row.user_created_at instanceof Date
+              ? row.user_created_at.toISOString()
+              : row.user_created_at,
+          updated_at:
+            row.user_updated_at instanceof Date
+              ? row.user_updated_at.toISOString()
+              : row.user_updated_at,
+        },
+      };
     },
 
     async deleteSession(tokenHash) {

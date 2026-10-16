@@ -2,9 +2,9 @@ import { buildSubscriptionsCsv } from '../services/csv.js';
 import { todayISO } from '../utils/dates.js';
 
 export function createExportHandler(subscriptionsService) {
-  return async (_req, res, next) => {
+  return async (req, res, next) => {
     try {
-      const subscriptions = await subscriptionsService.listAll();
+      const subscriptions = await subscriptionsService.listAll(req.user.id);
       const csv = buildSubscriptionsCsv(subscriptions);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader(

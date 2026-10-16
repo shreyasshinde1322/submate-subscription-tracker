@@ -1,145 +1,143 @@
 import { Router } from 'express';
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { ConflictError, HttpError, ValidationError } from '../utils/errors.js';
+import {
+  AUTH_RATE_LIMIT_WINDOW_MS,
+  LOGIN_RATE_LIMIT,
+  REGISTER_RATE_LIMIT,
+  SESSION_TTL_MS,
+} from '../config.js';
+import { createUsersRepository, normalizeEmail } from '../repositories/users.js';
 import { createAuthRepository } from '../repositories/auth.js';
+import { hashPassword, needsRehash, verifyPassword } from '../security/passwords.js';
+import { generateSessionToken, hashSessionToken } from '../security/tokens.js';
+import { HttpError, ValidationError } from '../utils/errors.js';
+import { createAuthRateLimiter } from '../middleware/rateLimit.js';
+import { authRequiredError, clearSessionCookie, readSessionToken, requireUser, setSessionCookie } from '../middleware/auth.js';
 
-const SESSION_COOKIE = 'submate_session';
-const SESSION_MAX_AGE_MS = 60 * 60 * 24 * 7 * 1000; // 7 days
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const NAME_MIN = 2;
+const NAME_MAX = 120;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 200;
 
-function parseCookies(header) {
-  const jar = {};
-  if (!header) return jar;
-  for (const part of String(header).split(';')) {
-    const index = part.indexOf('=');
-    if (index === -1) continue;
-    const name = part.slice(0, index).trim();
-    if (!name) continue;
-    jar[name] = decodeURIComponent(part.slice(index + 1).trim());
-  }
-  return jar;
-}
+// A valid bcrypt hash used only to equalise login timing when the email is
+// unknown, so attackers cannot enumerate accounts by response time.
+const DUMMY_HASH = '$2b$12$kj2ucrgPz.ttzn4sdG9y8Of3uo9TBI5ochijm4oJMmoFyQRIoULJy';
 
-function readToken(req) {
-  return parseCookies(req.headers.cookie)[SESSION_COOKIE] || null;
-}
-
-function hashToken(token) {
-  return createHash('sha256').update(String(token)).digest('hex');
-}
-
-function hashPassword(password, saltHex) {
-  const salt = Buffer.from(saltHex, 'hex');
-  return scryptSync(String(password), salt, 64).toString('hex');
-}
-
-function passwordMatches(storedHex, candidate, saltHex) {
-  const stored = Buffer.from(String(storedHex), 'hex');
-  const computed = Buffer.from(hashPassword(candidate, saltHex), 'hex');
-  if (stored.length !== computed.length || stored.length === 0) return false;
-  return timingSafeEqual(stored, computed);
-}
-
-function unauthorized(message, code) {
-  const error = new HttpError(401, message);
+function conflict(message, code) {
+  const error = new HttpError(409, message);
   error.code = code;
   return error;
 }
 
-function validateSetupPayload(body) {
-  const input = body && typeof body === 'object' ? body : {};
-  const errors = {};
-  const username = typeof input.username === 'string' ? input.username.trim() : '';
-  const password = typeof input.password === 'string' ? input.password : '';
-
-  if (username.length < 2 || username.length > 60) {
-    errors.username = 'Your name must be between 2 and 60 characters.';
-  }
-  if (password.length < 10 || password.length > 200) {
-    errors.password = 'Passphrase must be between 10 and 200 characters.';
-  }
-  if (Object.keys(errors).length > 0) throw new ValidationError(errors);
-  return { username, password };
+function publicUser(row) {
+  return { id: Number(row.id), name: row.name, email: row.email };
 }
 
-function validateLoginPayload(body) {
+function validateRegistration(body) {
   const input = body && typeof body === 'object' ? body : {};
   const errors = {};
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const email = typeof input.email === 'string' ? input.email.trim() : '';
   const password = typeof input.password === 'string' ? input.password : '';
-  if (!password) {
-    errors.password = 'Passphrase is required.';
+  const confirmPassword =
+    typeof input.confirmPassword === 'string' ? input.confirmPassword : '';
+
+  if (name.length < NAME_MIN || name.length > NAME_MAX) {
+    errors.name = `Name must be between ${NAME_MIN} and ${NAME_MAX} characters.`;
+  }
+  if (!email) {
+    errors.email = 'Email is required.';
+  } else if (email.length > 254 || !EMAIL_PATTERN.test(email)) {
+    errors.email = 'Enter a valid email address.';
+  }
+  if (password.length < PASSWORD_MIN || password.length > PASSWORD_MAX) {
+    errors.password = `Password must be between ${PASSWORD_MIN} and ${PASSWORD_MAX} characters.`;
+  }
+  if (confirmPassword !== password) {
+    errors.confirmPassword = 'Passwords do not match.';
   }
   if (Object.keys(errors).length > 0) throw new ValidationError(errors);
-  return { password };
+  return { name, email: normalizeEmail(email), password };
 }
 
-async function createSessionAndCookie(repo, res, token) {
-  await repo.createSession(hashToken(token));
-  res.cookie(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'strict',
-    path: '/',
-    maxAge: SESSION_MAX_AGE_MS,
-  });
+function validateLogin(body) {
+  const input = body && typeof body === 'object' ? body : {};
+  const errors = {};
+  const email = typeof input.email === 'string' ? input.email.trim() : '';
+  const password = typeof input.password === 'string' ? input.password : '';
+  if (!email) errors.email = 'Email is required.';
+  if (!password) errors.password = 'Password is required.';
+  if (Object.keys(errors).length > 0) throw new ValidationError(errors);
+  return { email: normalizeEmail(email), password };
 }
 
 export function createAuthRouter(db) {
-  const repo = createAuthRepository(db);
+  const users = createUsersRepository(db);
+  const sessions = createAuthRepository(db);
   const router = Router();
 
-  router.get('/status', async (req, res, next) => {
-    try {
-      const account = await repo.getLocalAccount();
-      const token = readToken(req);
-      let authenticated = false;
-      if (account && token) {
-        authenticated = Boolean(await repo.getSessionByTokenHash(hashToken(token)));
-      }
-      res.json({
-        configured: Boolean(account),
-        authenticated,
-        username: account ? account.username : null,
-      });
-    } catch (error) {
-      next(error);
-    }
+  const loginLimiter = createAuthRateLimiter(db, {
+    scope: 'login',
+    limit: LOGIN_RATE_LIMIT,
+    windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  });
+  const registerLimiter = createAuthRateLimiter(db, {
+    scope: 'register',
+    limit: REGISTER_RATE_LIMIT,
+    windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
   });
 
-  router.post('/setup', async (req, res, next) => {
+  async function startSession(res, user) {
+    const token = generateSessionToken();
+    await sessions.createSession({
+      tokenHash: hashSessionToken(token),
+      userId: user.id,
+      expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+    });
+    setSessionCookie(res, token);
+  }
+
+  router.post('/register', registerLimiter, async (req, res, next) => {
     try {
-      const { username, password } = validateSetupPayload(req.body);
-      const existing = await repo.getLocalAccount();
+      const { name, email, password } = validateRegistration(req.body);
+      const existing = await users.findByEmail(email);
       if (existing) {
-        throw new ConflictError('This local tracker is already set up.', {
-          code: 'ALREADY_SETUP',
-        });
+        throw conflict('An account with that email already exists.', 'EMAIL_TAKEN');
       }
-      const salt = randomBytes(16).toString('hex');
-      await repo.saveLocalAccount({
-        username,
-        passwordSalt: salt,
-        passwordHash: hashPassword(password, salt),
-      });
-      const token = randomBytes(32).toString('base64url');
-      await createSessionAndCookie(repo, res, token);
-      res.json({ authenticated: true, username });
+      const passwordHash = await hashPassword(password);
+      let user;
+      try {
+        user = await users.create({ name, email, passwordHash });
+      } catch (error) {
+        if (error && error.code === '23505') {
+          throw conflict('An account with that email already exists.', 'EMAIL_TAKEN');
+        }
+        throw error;
+      }
+      await startSession(res, user);
+      res.status(201).json({ user: publicUser(user) });
     } catch (error) {
       next(error);
     }
   });
 
-  router.post('/login', async (req, res, next) => {
+  router.post('/login', loginLimiter, async (req, res, next) => {
     try {
-      const { password } = validateLoginPayload(req.body);
-      const account = await repo.getLocalAccount();
-      if (!account) {
-        throw unauthorized('Set up this local tracker before opening its data.', 'SETUP_REQUIRED');
+      const { email, password } = validateLogin(req.body);
+      const account = await users.findByEmail(email);
+      // Always run a verification to keep timing consistent whether or not the
+      // account exists, and never reveal which field was wrong.
+      const storedHash = account ? account.password_hash : DUMMY_HASH;
+      const ok = await verifyPassword(password, storedHash);
+      if (!account || !ok) {
+        throw authRequiredError('Email or password is incorrect.', 'INVALID_CREDENTIALS');
       }
-      if (!passwordMatches(account.password_hash, password, account.password_salt)) {
-        throw unauthorized('Passphrase not recognised.', 'INVALID_CREDENTIALS');
+      if (needsRehash(storedHash)) {
+        await users.updatePasswordHash(account.id, await hashPassword(password));
       }
-      const token = randomBytes(32).toString('base64url');
-      await createSessionAndCookie(repo, res, token);
-      res.json({ authenticated: true, username: account.username });
+      const user = { id: Number(account.id), name: account.name, email: account.email };
+      await startSession(res, user);
+      res.json({ user });
     } catch (error) {
       next(error);
     }
@@ -147,37 +145,24 @@ export function createAuthRouter(db) {
 
   router.post('/logout', async (req, res, next) => {
     try {
-      const token = readToken(req);
-      if (token) await repo.deleteSession(hashToken(token));
-      res.clearCookie(SESSION_COOKIE, { path: '/' });
+      const token = readSessionToken(req);
+      if (token) {
+        await sessions.deleteSession(hashSessionToken(token));
+      }
+      clearSessionCookie(res);
       res.json({ authenticated: false });
     } catch (error) {
       next(error);
     }
   });
 
-  return router;
-}
-
-export function requireLocalSession(db) {
-  const repo = createAuthRepository(db);
-  return async (req, res, next) => {
+  router.get('/me', requireUser(db), async (req, res, next) => {
     try {
-      const account = await repo.getLocalAccount();
-      if (!account) {
-        throw unauthorized('Set up this local tracker before opening its data.', 'SETUP_REQUIRED');
-      }
-      const token = readToken(req);
-      if (!token) {
-        throw unauthorized('Unlock your local tracker to continue.', 'AUTH_REQUIRED');
-      }
-      const session = await repo.getSessionByTokenHash(hashToken(token));
-      if (!session) {
-        throw unauthorized('Session expired. Unlock the tracker again.', 'SESSION_EXPIRED');
-      }
-      next();
+      res.json({ user: publicUser(req.user) });
     } catch (error) {
       next(error);
     }
-  };
+  });
+
+  return router;
 }

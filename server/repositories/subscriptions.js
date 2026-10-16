@@ -24,12 +24,14 @@ function mapRow(row) {
 
 export function createSubscriptionsRepository(db) {
   return {
-    async list(filters = {}, options = {}) {
+    // Every query is scoped by user_id, so one account can never read or write
+    // another account's rows even if it guesses a record id.
+    async list(userId, filters = {}, options = {}) {
       const { q, category, status, billingCycle, renewalWindow, sortColumn, sortOrder } = filters;
       const today = options.today || todayISO();
-      const clauses = [];
-      const params = [];
-      let p = 0;
+      const clauses = ['user_id = $1'];
+      const params = [userId];
+      let p = 1;
 
       if (q) {
         p++;
@@ -87,33 +89,37 @@ export function createSubscriptionsRepository(db) {
         }
       }
 
-      const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+      const where = `WHERE ${clauses.join(' AND ')}`;
       const sql = `SELECT ${PUBLIC_COLUMNS} FROM subscriptions ${where} ORDER BY ${sortColumn} ${sortOrder}`;
       const result = await db.query(sql, params);
       return result.rows.map(mapRow);
     },
 
-    async listAll() {
-      const result = await db.query(`SELECT ${PUBLIC_COLUMNS} FROM subscriptions ORDER BY id`);
+    async listAll(userId) {
+      const result = await db.query(
+        `SELECT ${PUBLIC_COLUMNS} FROM subscriptions WHERE user_id = $1 ORDER BY id`,
+        [userId],
+      );
       return result.rows.map(mapRow);
     },
 
-    async getById(id) {
+    async getById(userId, id) {
       const result = await db.query(
-        `SELECT ${PUBLIC_COLUMNS} FROM subscriptions WHERE id = $1`,
-        [id],
+        `SELECT ${PUBLIC_COLUMNS} FROM subscriptions WHERE id = $1 AND user_id = $2`,
+        [id, userId],
       );
       return result.rows[0] ? mapRow(result.rows[0]) : null;
     },
 
-    async insert(data) {
+    async insert(userId, data) {
       const result = await db.query(
         `INSERT INTO subscriptions (
-          service_name, service_key, logo_key, price, currency_code, billing_cycle,
+          user_id, service_name, service_key, logo_key, price, currency_code, billing_cycle,
           category, next_renewal_date, status, plan_name, notes, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, NOW(), NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, NOW(), NOW())
         RETURNING ${PUBLIC_COLUMNS}`,
         [
+          userId,
           data.service_name,
           data.service_key || null,
           data.logo_key || null,
@@ -130,13 +136,13 @@ export function createSubscriptionsRepository(db) {
       return mapRow(result.rows[0]);
     },
 
-    async update(id, data) {
+    async update(userId, id, data) {
       const result = await db.query(
         `UPDATE subscriptions SET
           service_name = $1, service_key = $2, logo_key = $3, price = $4, currency_code = $5,
           billing_cycle = $6, category = $7, next_renewal_date = $8::date, status = $9,
           plan_name = $10, notes = $11, updated_at = NOW()
-        WHERE id = $12
+        WHERE id = $12 AND user_id = $13
         RETURNING ${PUBLIC_COLUMNS}`,
         [
           data.service_name,
@@ -151,29 +157,35 @@ export function createSubscriptionsRepository(db) {
           data.plan_name || null,
           data.notes || null,
           id,
+          userId,
         ],
       );
       return result.rows[0] ? mapRow(result.rows[0]) : null;
     },
 
-    async updateStatus(id, status) {
+    async updateStatus(userId, id, status) {
       const result = await db.query(
-        `UPDATE subscriptions SET status = $1, updated_at = NOW() WHERE id = $2
+        `UPDATE subscriptions SET status = $1, updated_at = NOW()
+         WHERE id = $2 AND user_id = $3
          RETURNING ${PUBLIC_COLUMNS}`,
-        [status, id],
+        [status, id, userId],
       );
       if (!result.rows[0]) return null;
       return mapRow(result.rows[0]);
     },
 
-    async remove(id) {
-      const result = await db.query('DELETE FROM subscriptions WHERE id = $1', [id]);
+    async remove(userId, id) {
+      const result = await db.query('DELETE FROM subscriptions WHERE id = $1 AND user_id = $2', [
+        id,
+        userId,
+      ]);
       return result.rowCount > 0;
     },
 
-    async countByStatus() {
+    async countByStatus(userId) {
       const result = await db.query(
-        'SELECT status, COUNT(*) AS count FROM subscriptions GROUP BY status',
+        'SELECT status, COUNT(*) AS count FROM subscriptions WHERE user_id = $1 GROUP BY status',
+        [userId],
       );
       const counts = { active: 0, paused: 0, cancelled: 0 };
       for (const row of result.rows) {

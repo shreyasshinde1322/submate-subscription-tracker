@@ -13,8 +13,15 @@ import {
 } from 'lucide-react';
 import { BrandMark } from './ui.jsx';
 
-export function Sidebar({ page, setPage, remindersCount, onExit }) {
+export function Sidebar({ page, setPage, remindersCount, user, onLogout }) {
   const [profileOpen, setProfileOpen] = useState(false);
+  const displayName = user?.name || 'Your account';
+  const initials = (displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('') || 'SM').toUpperCase();
   const primary = [
     { label: 'Home', icon: House },
     { label: 'Subscriptions', icon: CreditCard },
@@ -82,19 +89,20 @@ export function Sidebar({ page, setPage, remindersCount, onExit }) {
           <div className="upgrade-glow" />
         </div>
         <div className="profile">
-          <div className="avatar">SM</div>
+          <div className="avatar">{initials}</div>
           <div>
-            <b>My workspace</b>
-            <small>Local single user</small>
+            <b>{displayName}</b>
+            <small>{user?.email || 'Signed in'}</small>
           </div>
-          <button className="profile-menu" aria-label="Open workspace menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>
+          <button className="profile-menu" aria-label="Open account menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>
             <Ellipsis size={19} />
           </button>
           {profileOpen && (
             <div className="profile-popover" role="menu">
-              <div className="profile-popover-heading"><b>My workspace</b><small>Local single-user tracker</small></div>
+              <div className="profile-popover-heading"><b>{displayName}</b><small>{user?.email || 'Signed in'}</small></div>
               <button role="menuitem" onClick={() => { setPage('Overview'); setProfileOpen(false); }}><House size={15} /> Go to home</button>
-              <button role="menuitem" onClick={() => { setProfileOpen(false); onExit?.(); }}><LogOut size={15} /> Lock and sign out</button>
+              <button role="menuitem" onClick={() => { setPage('Settings'); setProfileOpen(false); }}><Settings size={15} /> Account settings</button>
+              <button role="menuitem" onClick={() => { setProfileOpen(false); onLogout?.(); }}><LogOut size={15} /> Sign out</button>
             </div>
           )}
         </div>

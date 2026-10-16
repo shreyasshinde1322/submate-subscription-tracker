@@ -27,8 +27,8 @@ function resolveCatalogFields(value) {
 export function createSubscriptionsService(db) {
   const repo = createSubscriptionsRepository(db);
 
-  async function guardDuplicates(value, force, excludeId = null) {
-    const all = await repo.listAll();
+  async function guardDuplicates(userId, value, force, excludeId = null) {
+    const all = await repo.listAll(userId);
     const duplicates = findPotentialDuplicates(all, value, excludeId);
     if (duplicates.length > 0 && !force) {
       throw new ConflictError('A similar subscription already exists.', {
@@ -40,59 +40,59 @@ export function createSubscriptionsService(db) {
   }
 
   return {
-    async list(query, options = {}) {
-      return repo.list(query, options);
+    async list(userId, query, options = {}) {
+      return repo.list(userId, query, options);
     },
 
-    async listAll() {
-      return repo.listAll();
+    async listAll(userId) {
+      return repo.listAll(userId);
     },
 
-    async get(id) {
-      const record = await repo.getById(id);
+    async get(userId, id) {
+      const record = await repo.getById(userId, id);
       if (!record) throw new NotFoundError('Subscription not found.');
       return record;
     },
 
-    async create(payload, options = {}) {
+    async create(userId, payload, options = {}) {
       const { valid, errors, value } = validateSubscriptionInput(payload);
       if (!valid) throw new ValidationError(errors);
       resolveCatalogFields(value);
-      const duplicates = await guardDuplicates(value, options.force === true);
-      const record = await repo.insert(value);
+      const duplicates = await guardDuplicates(userId, value, options.force === true);
+      const record = await repo.insert(userId, value);
       return { record, duplicates };
     },
 
-    async update(id, payload, options = {}) {
-      const existing = await repo.getById(id);
+    async update(userId, id, payload, options = {}) {
+      const existing = await repo.getById(userId, id);
       if (!existing) throw new NotFoundError('Subscription not found.');
       const { valid, errors, value } = validateSubscriptionInput(payload);
       if (!valid) throw new ValidationError(errors);
       resolveCatalogFields(value);
-      const duplicates = await guardDuplicates(value, options.force === true, id);
-      const record = await repo.update(id, value);
+      const duplicates = await guardDuplicates(userId, value, options.force === true, id);
+      const record = await repo.update(userId, id, value);
       return { record, duplicates };
     },
 
-    async setStatus(id, status) {
+    async setStatus(userId, id, status) {
       const normalized = String(status || '').trim().toLowerCase();
       if (!STATUSES.includes(normalized)) {
         throw new ValidationError({ status: 'Unsupported status.' });
       }
-      const record = await repo.updateStatus(id, normalized);
+      const record = await repo.updateStatus(userId, id, normalized);
       if (!record) throw new NotFoundError('Subscription not found.');
       return record;
     },
 
-    async remove(id) {
-      const existing = await repo.getById(id);
+    async remove(userId, id) {
+      const existing = await repo.getById(userId, id);
       if (!existing) throw new NotFoundError('Subscription not found.');
-      await repo.remove(id);
+      await repo.remove(userId, id);
       return existing;
     },
 
-    async countByStatus() {
-      return repo.countByStatus();
+    async countByStatus(userId) {
+      return repo.countByStatus(userId);
     },
   };
 }

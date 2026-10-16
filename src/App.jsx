@@ -11,10 +11,10 @@ import { Overview } from './pages/Overview.jsx';
 import { Renewals } from './pages/Renewals.jsx';
 import { Settings } from './pages/Settings.jsx';
 import { Subscriptions } from './pages/Subscriptions.jsx';
-import { Welcome } from './pages/Welcome.jsx';
-import { api, downloadExport } from './api/client.js';
+import { AuthScreen } from './pages/Auth.jsx';
+import { api, downloadExport, UNAUTHORIZED_EVENT } from './api/client.js';
 
-function Shell({ page, setPage, onExit }) {
+function Shell({ page, setPage, user, onLogout }) {
   const { status, error, retry, toast, dashboard } = useSubMate();
   const [modal, setModal] = useState(null);
   const [mobileNav, setMobileNav] = useState(false);
@@ -57,7 +57,8 @@ function Shell({ page, setPage, onExit }) {
           page={page}
           setPage={(next) => { setPage(next); setMobileNav(false); }}
           remindersCount={page === 'Renewals' ? remindersCount : undefined}
-          onExit={onExit}
+          user={user}
+          onLogout={onLogout}
         />
       </div>
       <main className="main-area">
@@ -66,7 +67,7 @@ function Shell({ page, setPage, onExit }) {
           <footer className="app-footer">
             <span>Made for a little more peace of mind.</span>
             <span>
-              SubMate <i>·</i> Local single-user tracker
+              SubMate <i>·</i> Signed in as {user.name}
               <button className="footer-export" onClick={downloadExport}>
                 <Download size={12} /> Export CSV
               </button>
@@ -94,56 +95,54 @@ function Shell({ page, setPage, onExit }) {
 }
 
 export default function App() {
-  const [authStatus, setAuthStatus] = useState(null);
-  const [entered, setEntered] = useState(false);
+  const [user, setUser] = useState(null);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [page, setPage] = useState('Overview');
-  const [authError, setAuthError] = useState('');
-  const [authBusy, setAuthBusy] = useState(false);
 
   useEffect(() => {
     let mounted = true;
-    api.auth.status()
-      .then((result) => { if (mounted) setAuthStatus(result); })
-      .catch((error) => { if (mounted) setAuthStatus({ error: error.message || 'Could not reach the local server.' }); });
-    return () => { mounted = false; };
+    api.auth
+      .me()
+      .then((result) => {
+        if (mounted) setUser(result.user);
+      })
+      .catch(() => {
+        if (mounted) setUser(null);
+      })
+      .finally(() => {
+        if (mounted) setCheckingSession(false);
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
+  // Expired sessions anywhere in the app immediately return the user to sign in.
   useEffect(() => {
-    if (authStatus?.authenticated) setEntered(true);
-  }, [authStatus]);
-
-  async function enterWithPassphrase(credentials) {
-    setAuthBusy(true);
-    setAuthError('');
-    try {
-      const result = authStatus?.configured
-        ? await api.auth.login({ password: credentials.password })
-        : await api.auth.setup(credentials);
-      setAuthStatus({ configured: true, authenticated: true, username: result.username });
-      setEntered(true);
-    } catch (error) {
-      setAuthError(error.validation?.password || error.validation?.username || error.message || 'Could not unlock the local tracker.');
-    } finally {
-      setAuthBusy(false);
+    function handleUnauthorized() {
+      setUser(null);
+      setPage('Overview');
     }
-  }
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+  }, []);
 
-  async function lockTracker() {
+  async function logout() {
     try {
       await api.auth.logout();
-      setAuthStatus((current) => ({ ...current, authenticated: false }));
-      setEntered(false);
-    } catch (error) {
-      setAuthError(error.message || 'Could not lock the local tracker.');
+    } catch {
+      // Even if the request fails, clear the local identity so no data leaks.
     }
+    setUser(null);
+    setPage('Overview');
   }
 
-  if (!authStatus) return <LoadingScreen />;
-  if (!entered) return <Welcome configured={authStatus.configured} username={authStatus.username} error={authError || authStatus.error} busy={authBusy} onSubmit={enterWithPassphrase} />;
+  if (checkingSession) return <LoadingScreen />;
+  if (!user) return <AuthScreen onAuthenticated={setUser} />;
 
   return (
-    <SubMateProvider>
-      <Shell page={page} setPage={setPage} onExit={lockTracker} />
+    <SubMateProvider user={user} onLogout={logout}>
+      <Shell page={page} setPage={setPage} user={user} onLogout={logout} />
     </SubMateProvider>
   );
 }

@@ -219,3 +219,7 @@
 .local-note code{font-size:9px;background:#f0eee6;padding:1px 4px;border-radius:4px;color:#5a574f}
 .auth-welcome h2{font:600 27px Manrope;letter-spacing:-.8px;margin:9px 0 7px}
 .auth-welcome .eyebrow{margin-bottom:7px}
+
+.auth-switch{background:none;border:0;padding:0;color:#2f6f68;font:inherit;font-weight:600;cursor:pointer}
+.auth-switch:hover{text-decoration:underline}
+.login-form .field-error{margin-top:-6px;margin-bottom:2px}

@@ -1,5 +1,12 @@
 // Shared API client for the SubMate backend. All browser-to-PostgreSQL traffic
-// flows through these functions; the database file is never touched directly.
+// flows through these functions; the database connection string never reaches
+// the frontend.
+//
+// Session cookies are HttpOnly, so the browser attaches them automatically. We
+// use `credentials: 'include'` so the same session works whether the API is
+// same-origin (bundled SPA) or an explicitly trusted cross-origin/CORS host.
+// When the server reports an expired session the client broadcasts an event that
+// the app listens for, sending the user back to the sign-in screen.
 
 export class ApiError extends Error {
   constructor(status, body = {}) {
@@ -13,12 +20,14 @@ export class ApiError extends Error {
   }
 }
 
+export const UNAUTHORIZED_EVENT = 'submate:unauthorized';
+
 async function request(path, { method = 'GET', body, headers } = {}) {
   let response;
   try {
     response = await fetch(`/api${path}`, {
       method,
-      credentials: 'same-origin',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
@@ -34,7 +43,15 @@ async function request(path, { method = 'GET', body, headers } = {}) {
     : await response.text();
 
   if (!response.ok) {
-    throw new ApiError(response.status, payload);
+    const error = new ApiError(response.status, payload);
+    if (
+      response.status === 401 &&
+      error.code !== 'INVALID_CREDENTIALS' &&
+      typeof window !== 'undefined'
+    ) {
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: error }));
+    }
+    throw error;
   }
   return payload;
 }
@@ -54,8 +71,8 @@ export const api = {
   health: () => request('/health'),
 
   auth: {
-    status: () => request('/auth/status'),
-    setup: (body) => request('/auth/setup', { method: 'POST', body }),
+    me: () => request('/auth/me'),
+    register: (body) => request('/auth/register', { method: 'POST', body }),
     login: (body) => request('/auth/login', { method: 'POST', body }),
     logout: () => request('/auth/logout', { method: 'POST' }),
   },

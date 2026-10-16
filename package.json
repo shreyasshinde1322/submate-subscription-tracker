@@ -22,6 +22,7 @@
     "db:reset": "node scripts/reset-db.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "dotenv": "^18.0.8",
     "express": "^4.21.2",
     "lucide-react": "latest",

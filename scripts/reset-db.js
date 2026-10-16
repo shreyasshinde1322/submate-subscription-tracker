@@ -23,10 +23,11 @@ if (!DATABASE_URL) {
 const pool = createPool();
 
 try {
+  await pool.query('DROP TABLE IF EXISTS auth_rate_limits CASCADE');
   await pool.query('DROP TABLE IF EXISTS auth_sessions CASCADE');
-  await pool.query('DROP TABLE IF EXISTS local_account CASCADE');
   await pool.query('DROP TABLE IF EXISTS settings CASCADE');
   await pool.query('DROP TABLE IF EXISTS subscriptions CASCADE');
+  await pool.query('DROP TABLE IF EXISTS users CASCADE');
   await pool.query('DROP TABLE IF EXISTS schema_migrations CASCADE');
   await runMigrations(pool);
   console.log('SubMate database reset. A fresh, empty schema was created.');

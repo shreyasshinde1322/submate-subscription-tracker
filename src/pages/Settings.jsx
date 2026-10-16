@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Bell, Check, HardDrive, LockKeyhole, Wallet } from 'lucide-react';
+import { Bell, Check, HardDrive, LockKeyhole, LogOut, Mail, User, Wallet } from 'lucide-react';
 import { Header } from '../components/Header.jsx';
 import { useSubMate } from '../context/SubMateContext.jsx';
 import { CURRENCIES } from '../utils/format.js';
 
 export function Settings() {
-  const { settings, saveSettings } = useSubMate();
+  const { settings, saveSettings, user, logout } = useSubMate();
   const [tab, setTab] = useState('Preferences');
   const [preferredCurrency, setPreferredCurrency] = useState('');
   const [budget, setBudget] = useState('');
@@ -41,7 +41,7 @@ export function Settings() {
         budget_currency: budget.trim() === '' ? null : budgetCurrency,
         reminder_thresholds: parsedThresholds,
       });
-      setFeedback({ tone: 'success', message: 'Preferences saved locally.' });
+      setFeedback({ tone: 'success', message: 'Preferences saved.' });
     } catch (err) {
       if (err.validation) {
         setErrors(err.validation);
@@ -133,7 +133,7 @@ export function Settings() {
             <div className="settings-heading">
               <div className="eyebrow">NOTIFICATIONS</div>
               <h2>Reminders stay in the app.</h2>
-              <p>SubMate is a local, single-user app. Renewal reminders appear here, in the bell, and on the Renewals screen.</p>
+              <p>Renewal reminders appear here, in the bell, and on the Renewals screen.</p>
               <div className="setting-note"><Bell size={15} /> No push notifications, email or SMS are sent.</div>
             </div>
           )}
@@ -141,11 +141,18 @@ export function Settings() {
           {tab === 'Account' && (
             <div className="settings-heading">
               <div className="eyebrow">ACCOUNT</div>
-              <h2>You run this app locally.</h2>
-              <p>There is no SubMate account and no third-party sync. Your data lives in the PostgreSQL database you configured.</p>
-              <div className="setting-note"><HardDrive size={15} /> Single user · PostgreSQL database · no remote access</div>
-              <div className="setting-note"><LockKeyhole size={15} /> Nothing is shared with anyone else</div>
+              <h2>Signed in as {user?.name || 'your account'}.</h2>
+              <p>Your subscriptions, settings and exports are private to this account.</p>
+              <div className="setting-note"><User size={15} /> {user?.name || 'Your account'}</div>
+              <div className="setting-note"><Mail size={15} /> {user?.email || 'No email on file'}</div>
+              <div className="setting-note"><HardDrive size={15} /> Data stored in your PostgreSQL database</div>
+              <div className="setting-note"><LockKeyhole size={15} /> Passwords are hashed; sessions use secure HttpOnly cookies</div>
               <div className="setting-note"><Wallet size={15} /> Import/export available via CSV on the Subscriptions screen</div>
+              <div className="settings-actions">
+                <button className="secondary-button" type="button" onClick={() => logout?.()}>
+                  <LogOut size={15} /> Sign out
+                </button>
+              </div>
             </div>
           )}
 

@@ -38,10 +38,10 @@ export function createDashboardService({
   settingsService,
   today = todayISO(),
 }) {
-  async function overview() {
+  async function overview(userId) {
     const [subscriptions, settings] = await Promise.all([
-      subscriptionsService.listAll(),
-      settingsService.get(),
+      subscriptionsService.listAll(userId),
+      settingsService.get(userId),
     ]);
 
     const monthlyByCurrency = monthlyTotalsByCurrency(subscriptions);

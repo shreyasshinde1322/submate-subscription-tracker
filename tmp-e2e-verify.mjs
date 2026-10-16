@@ -71,8 +71,8 @@ try {
   const healthBody = await health.json();
   check('GET /api/health returns 200 ok/ready', health.status === 200 && healthBody.status === 'ok' && healthBody.database === 'ready', JSON.stringify(healthBody));
 
-  const setup = await api('/api/auth/setup', { method: 'POST', body: { username: 'E2E User', password: 'e2e-password-123' } });
-  check('POST /api/auth/setup authenticates', setup.status === 200 && setup.body?.authenticated === true, `status ${setup.status}`);
+  const setup = await api('/api/auth/register', { method: 'POST', body: { name: 'E2E User', email: 'e2e@example.com', password: 'e2e-password-123', confirmPassword: 'e2e-password-123' } });
+  check('POST /api/auth/register creates an account and session', setup.status === 201 && typeof setup.body?.user?.id === 'number', `status ${setup.status}`);
 
   const payload = {
     service_name: 'Netflix', service_key: 'netflix', logo_key: 'netflix', price: 15.49,
@@ -105,8 +105,8 @@ try {
   const csv = await exportRes.text();
   check('GET /api/export.csv returns CSV summary', exportRes.status === 200 && csv.includes('Service Name') && csv.includes('Netflix'), `status ${exportRes.status}`);
 
-  const catalog = await api('/api/catalog/services?q=net');
-  check('GET /api/catalog/services search works', catalog.status === 200, `status ${catalog.status}`);
+  const catalog = await api('/api/catalog?q=net');
+  check('GET /api/catalog search works', catalog.status === 200, `status ${catalog.status}`);
 
   const removed = await api(`/api/subscriptions/${id}`, { method: 'DELETE' });
   check('DELETE subscription', removed.status === 200 && removed.body?.deleted === true);

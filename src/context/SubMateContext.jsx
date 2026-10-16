@@ -3,7 +3,7 @@ import { api } from '../api/client.js';
 
 const SubMateContext = createContext(null);
 
-export function SubMateProvider({ children }) {
+export function SubMateProvider({ user, onLogout, children }) {
   const [catalog, setCatalog] = useState(null);
   const [subscriptions, setSubscriptions] = useState([]);
   const [dashboard, setDashboard] = useState(null);
@@ -138,6 +138,8 @@ export function SubMateProvider({ children }) {
 
   const value = useMemo(
     () => ({
+      user,
+      logout: onLogout,
       status,
       error,
       refreshing,
@@ -159,6 +161,8 @@ export function SubMateProvider({ children }) {
       downloadCsv: api.exportUrl,
     }),
     [
+      user,
+      onLogout,
       status, error, refreshing, catalog, catalogByKey, categories, subscriptions,
       dashboard, settings, toast, loadAll, refresh, notify, createSubscription,
       updateSubscription, setSubscriptionStatus, removeSubscription, saveSettings,

@@ -20,7 +20,7 @@ export function createSubscriptionsRouter(service) {
   router.get('/', async (req, res, next) => {
     try {
       const filters = parseSubscriptionQuery(req.query);
-      const subscriptions = await service.list(filters);
+      const subscriptions = await service.list(req.user.id, filters);
       res.json({ count: subscriptions.length, subscriptions });
     } catch (error) {
       next(error);
@@ -29,7 +29,9 @@ export function createSubscriptionsRouter(service) {
 
   router.post('/', async (req, res, next) => {
     try {
-      const { record, duplicates } = await service.create(req.body, { force: isForced(req.query) });
+      const { record, duplicates } = await service.create(req.user.id, req.body, {
+        force: isForced(req.query),
+      });
       res.status(201).json({ subscription: record, duplicates });
     } catch (error) {
       next(error);
@@ -38,7 +40,7 @@ export function createSubscriptionsRouter(service) {
 
   router.get('/:id', async (req, res, next) => {
     try {
-      const record = await service.get(parseId(req.params.id));
+      const record = await service.get(req.user.id, parseId(req.params.id));
       res.json(record);
     } catch (error) {
       next(error);
@@ -48,7 +50,7 @@ export function createSubscriptionsRouter(service) {
   router.put('/:id', async (req, res, next) => {
     try {
       const id = parseId(req.params.id);
-      const { record, duplicates } = await service.update(id, req.body, {
+      const { record, duplicates } = await service.update(req.user.id, id, req.body, {
         force: isForced(req.query),
       });
       res.json({ subscription: record, duplicates });
@@ -59,7 +61,7 @@ export function createSubscriptionsRouter(service) {
 
   router.patch('/:id/status', async (req, res, next) => {
     try {
-      const record = await service.setStatus(parseId(req.params.id), req.body?.status);
+      const record = await service.setStatus(req.user.id, parseId(req.params.id), req.body?.status);
       res.json({ subscription: record });
     } catch (error) {
       next(error);
@@ -68,7 +70,7 @@ export function createSubscriptionsRouter(service) {
 
   router.delete('/:id', async (req, res, next) => {
     try {
-      await service.remove(parseId(req.params.id));
+      await service.remove(req.user.id, parseId(req.params.id));
       res.json({ deleted: true });
     } catch (error) {
       next(error);
