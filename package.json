@@ -1,0 +1,49 @@
+{
+  "name": "submate-subscription-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "SubMate - a single-user subscription and renewal tracker backed by PostgreSQL.",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c yellow,cyan \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "node server/index.js",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "preview": "vite preview",
+    "test": "npm run test:server && npm run test:web",
+    "test:server": "node --test \"tests/**/*.test.js\"",
+    "test:web": "vitest run",
+    "lint": "eslint .",
+    "generate:logos": "node scripts/generate-logos.js",
+    "db:reset": "node scripts/reset-db.js"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.8",
+    "express": "^4.21.2",
+    "lucide-react": "latest",
+    "pg": "^8.23.1",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@vitejs/plugin-react": "latest",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.19.0",
+    "eslint-plugin-react": "^7.37.4",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "globals": "^15.14.0",
+    "jsdom": "^26.0.0",
+    "pg-mem": "^3.0.14",
+    "simple-icons": "^16.34.0",
+    "vite": "latest",
+    "vitest": "^3.0.5"
+  }
+}

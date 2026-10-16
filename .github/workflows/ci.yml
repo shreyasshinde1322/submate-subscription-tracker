@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: submate
+          POSTGRES_PASSWORD: submate
+          POSTGRES_DB: submate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U submate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run tests (server + web)
+        run: npm test
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Smoke-test the server against the built bundle
+        env:
+          DATABASE_URL: postgresql://submate:submate@127.0.0.1:5432/submate
+          PG_SSL: 'false'
+          PORT: '3001'
+        run: |
+          node server/index.js &
+          SERVER_PID=$!
+          sleep 3
+          curl --fail --silent http://127.0.0.1:3001/api/health
+          kill $SERVER_PID
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-node${{ matrix.node-version }}
+          path: dist
+          if-no-files-found: error
